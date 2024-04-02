@@ -2,8 +2,8 @@
 const request = require("supertest");
 // note that we take advantage of @jest/globals (describe, it, expect, etc.)
 // API for expect can be found here: https://jestjs.io/docs/expect
-
 const app = require("../index");
+const { sha256 } = require("js-sha256");
 
 describe("Endpoint tests", () => {
   // Make sure the server is in default state when testing
@@ -89,7 +89,25 @@ describe("Endpoint tests", () => {
       expect(data.body).toHaveProperty("title", "Scientist Eleanor Follows");
       expect(data.body).toHaveProperty("author", "Gabriel Smith");
       expect(data.body).toHaveProperty("genreId", 2);
-      expect(Object.keys(data.body).length).toBe(4);
+      expect(Object.keys(data.body)).toHaveLength(4);
+    });
+  });
+
+  describe("Testing Successful Calls To Endpoint: POST /api/v1/genres", () => {
+    correct_auth = sha256.hmac(
+      "bookSecret",
+      "post /api/v1/genres"
+    );
+
+    correct_genre = {
+      "name":"owner" 
+    }
+
+    test("Expecting A Correct 201 Status And For The Genre To Be Added To Storage", async () => {
+      const attempt = await request(app).post("/api/v1/genres").set({"Authorization":"HMAC "+correct_auth}).send(correct_genre);
+      expect(attempt.statusCode).toBe(201);
+      const all_genres = await request(app).get("/api/v1/genres");
+      expect(all_genres.body.some((genre) => {return genre.name === correct_genre.name})).toBe(true);
     });
   });
 
@@ -133,6 +151,59 @@ describe("Endpoint tests", () => {
       expect(attempt.body.message).not.toBeFalsy();
     });
   });
+
+  describe("Testing Failed Calls To Endpoint: POST /api/v1/genres/:genreId/books", () => {
+    incorrect_book = {
+      "name":"railroad"
+    }
+
+    test("Should Fail Due To No Author In The Request Body", async () => {
+      const attempt = await request(app).post("/api/v1/genres/2/books").send(incorrect_book)
+      expect(attempt.statusCode).toBe(400);
+      expect(attempt.body).not.toBeUndefined();
+      expect(attempt.body).toHaveProperty("message");
+      expect(attempt.body.message).not.toBeFalsy();
+    });
+  });
+
+  describe("Testing Failed Calls To Endpoint: POST /api/v1/genres", () => {
+    incorrect_auth = sha256.hmac(
+      "bookSecret",
+      "blub"
+    );
+
+    correct_genre = {
+      "name":"owner" 
+    }
+
+    test("Should Fail Due To Incorrect Authentication", async () => {
+      const attempt = await request(app).post("/api/v1/genres").set({"Authorization":incorrect_auth}).send(correct_genre);
+      expect(attempt.statusCode).toBe(403);
+      expect(attempt.body).not.toBeUndefined();
+      expect(attempt.body).toHaveProperty("message");
+      expect(attempt.body.message).not.toBeFalsy();
+    });
+  });
+
+  /*---------------
+  |   SECURITY    |
+  ---------------*/
+  describe("Testing Vulnerabillity With Information From Intercepted Message", () => {
+    malicious_payload = {
+      "name":"#9e84a1"
+    }
+
+    test("Should Succeed At Using The Intercepted Authentication To Make Modified Request", async () => {
+      const attempt = await request(app).post("/api/v1/genres").set({
+        "Authorization":"HMAC d5951928a797e3de418978abeb1c4f036672aa63b3241843493bfae1c0e60923",
+        "Content-Type": "application/json"
+      }).send(malicious_payload);
+      expect(attempt.statusCode).toBe(201);
+      const all_genres = await request(app).get("/api/v1/genres");
+      expect(all_genres.body.some((genre) => {return genre.name === malicious_payload.name})).toBe(true);
+    });
+  });
+
   // Try to call and endpoint that does not exists
 
   describe("Testing For Non Existent Endpoint",() => {
